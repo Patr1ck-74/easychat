@@ -1,0 +1,12 @@
+services:
+  easychat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: easychat:latest
+    container_name: easychat
+    ports:
+      - "7777:7777"
+    restart: unless-stopped
+    volumes:
+      - ./server/presets.json:/app/server/presets.json:ro

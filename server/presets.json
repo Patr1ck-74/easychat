@@ -1,0 +1,21 @@
+{
+  "appName": "EasyChat AI",
+  "backgroundImage": "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1920&auto=format&fit=crop",
+  "defaultPresetId": "openai",
+  "presets": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-4o",
+      "apiKey": "sk-REPLACE_ME"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKey": "sk-REPLACE_ME"
+    }
+  ]
+}

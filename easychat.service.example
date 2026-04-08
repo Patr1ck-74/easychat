@@ -1,0 +1,17 @@
+[Unit]
+Description=EasyChat Express Server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/easychat/server
+ExecStart=/usr/bin/node /opt/easychat/server/server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=7777
+Environment=HOST=127.0.0.1
+
+[Install]
+WantedBy=multi-user.target

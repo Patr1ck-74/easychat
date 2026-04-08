@@ -1,0 +1,5 @@
+node_modules/
+server/node_modules/
+server/presets.local.json
+.env
+.DS_Store

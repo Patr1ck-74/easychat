@@ -1,0 +1,15 @@
+{
+  "name": "easychat-server",
+  "version": "1.0.0",
+  "description": "EasyChat AI proxy server",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "docker:build": "docker build -t easychat:latest .."
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

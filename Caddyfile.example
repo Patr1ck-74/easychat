@@ -1,0 +1,11 @@
+your-domain.com {
+    encode zstd gzip
+
+    @api path /api/*
+    reverse_proxy @api 127.0.0.1:7777
+
+    root * /opt/easychat/web
+    file_server
+
+    try_files {path} /index.html
+}
