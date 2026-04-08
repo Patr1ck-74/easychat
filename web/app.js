@@ -5,6 +5,9 @@ let sessions = JSON.parse(localStorage.getItem('easychat-sessions')) || [];
 let currentSessionId = localStorage.getItem('easychat-current-id') || null;
 let abortController = null;
 let pendingImageDataUrl = '';
+const IMAGE_MAX_WIDTH = 1280;
+const IMAGE_MAX_HEIGHT = 1280;
+const IMAGE_QUALITY = 0.82;
 
 function saveSessions() {
   localStorage.setItem('easychat-sessions', JSON.stringify(sessions));
@@ -23,8 +26,56 @@ function sanitizeImageUrl(url) {
   const value = String(url || '').trim();
   if (!value) return '';
   if (/^https?:\/\//i.test(value)) return value;
+  if (/^\/uploads\//i.test(value)) return value;
   if (/^data:image\//i.test(value)) return value;
   return '';
+}
+
+function dataUrlSizeKB(dataUrl) {
+  return Math.round((String(dataUrl || '').length * 3) / 4 / 1024);
+}
+
+async function uploadImageDataUrl(dataUrl) {
+  const res = await fetch('/api/upload-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataUrl })
+  });
+
+  const data = await res.json();
+  if (!res.ok || !data?.ok || !data?.url) {
+    throw new Error(data?.error || `上传失败 HTTP ${res.status}`);
+  }
+
+  return sanitizeImageUrl(data.url);
+}
+
+async function compressImageDataUrl(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      const ratio = Math.min(IMAGE_MAX_WIDTH / width, IMAGE_MAX_HEIGHT / height, 1);
+      width = Math.max(1, Math.round(width * ratio));
+      height = Math.max(1, Math.round(height * ratio));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+      const compressed = canvas.toDataURL('image/jpeg', IMAGE_QUALITY);
+      resolve(compressed || dataUrl);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 function extractImageUrl(part) {
@@ -61,6 +112,7 @@ function normalizeMessageContent(content) {
 }
 
 function renderBubbleContent(bubble, content) {
+  bubble.__content = content;
   const normalized = normalizeMessageContent(content);
   bubble.innerHTML = '';
 
@@ -111,12 +163,28 @@ function handleUserInputPaste(event) {
     if (!file) continue;
 
     const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = sanitizeImageUrl(reader.result);
-      if (!dataUrl) return;
-      pendingImageDataUrl = dataUrl;
-      updateImagePreview();
-      setStatus('已粘贴截图，可直接发送', 'success');
+    reader.onload = async () => {
+      try {
+        const dataUrl = sanitizeImageUrl(reader.result);
+        if (!dataUrl) return;
+
+        setStatus('截图处理中...', 'info');
+        const before = dataUrlSizeKB(dataUrl);
+        const compressed = await compressImageDataUrl(dataUrl);
+        const finalDataUrl = sanitizeImageUrl(compressed) || dataUrl;
+        const after = dataUrlSizeKB(finalDataUrl);
+
+        const uploadedUrl = await uploadImageDataUrl(finalDataUrl);
+        if (!uploadedUrl) {
+          throw new Error('上传后未返回有效图片地址');
+        }
+
+        pendingImageDataUrl = uploadedUrl;
+        updateImagePreview();
+        setStatus(`截图已就绪（${before}KB → ${after}KB）`, 'success');
+      } catch (error) {
+        setStatus(`截图处理失败：${error.message}`, 'error');
+      }
     };
     reader.readAsDataURL(file);
     event.preventDefault();
@@ -205,12 +273,15 @@ function updatePresetInfo() {
 }
 
 function createNewChat() {
-  const id = Date.now().toString();
+  if (abortController) abortController.abort();
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   sessions.unshift({ id, title: 'New Chat', history: [] });
   currentSessionId = id;
   saveSessions();
   renderHistoryList();
   loadSession(id);
+  setStatus('已新建会话', 'success');
   if (window.innerWidth < 1024) toggleSidebar();
 }
 
@@ -273,6 +344,36 @@ function deleteSession(e, id) {
   }
 }
 
+function stringifyMessageForCopy(content) {
+  const normalized = normalizeMessageContent(content);
+  const blocks = [];
+  if (normalized.text) blocks.push(normalized.text);
+
+  normalized.images.forEach((url) => {
+    if (/^data:image\//i.test(url)) {
+      blocks.push('[截图图片]');
+    } else {
+      blocks.push(`[图片] ${url}`);
+    }
+  });
+
+  return blocks.join('\n');
+}
+
+async function copyMessage(content) {
+  try {
+    const text = stringifyMessageForCopy(content);
+    if (!text) {
+      setStatus('没有可复制内容', 'info');
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    setStatus('已复制到剪贴板', 'success');
+  } catch (error) {
+    setStatus(`复制失败：${error.message}`, 'error');
+  }
+}
+
 function renderBubble(role, content) {
   document.getElementById('welcome-view')?.remove();
 
@@ -288,7 +389,18 @@ function renderBubble(role, content) {
   } prose dark:prose-invert prose-sm leading-relaxed`;
 
   renderBubbleContent(bubble, content);
-  div.innerHTML = `<span class="text-[9px] font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-2 px-2">${role}</span>`;
+
+  const meta = document.createElement('div');
+  meta.className = 'mb-2 px-2 flex items-center gap-2';
+  meta.innerHTML = `<span class="text-[9px] font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest">${role}</span>`;
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'text-[10px] text-slate-400 hover:text-blue-500 transition';
+  copyBtn.textContent = '复制';
+  copyBtn.onclick = () => copyMessage(bubble.__content);
+
+  meta.appendChild(copyBtn);
+  div.appendChild(meta);
   div.appendChild(bubble);
   container.appendChild(div);
 

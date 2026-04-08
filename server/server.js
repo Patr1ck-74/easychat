@@ -16,8 +16,13 @@ const WEB_ROOT = path.resolve(__dirname, '../web');
 const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'presets.json');
 const EXAMPLE_CONFIG_PATH = path.join(__dirname, 'presets.example.json');
 const ADMIN_PASSWORD = process.env.EASYCHAT_ADMIN_PASSWORD || '';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '10mb' }));
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 
 function ensureConfigFile() {
   if (fs.existsSync(CONFIG_PATH)) return;
@@ -105,6 +110,42 @@ function getPublicConfig() {
 function findPresetById(id) {
   const config = loadConfig();
   return config.presets.find((preset) => preset.id === id);
+}
+
+function getExtByMime(mime) {
+  const map = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+    'image/gif': 'gif'
+  };
+  return map[mime] || '';
+}
+
+function saveBase64Image(dataUrl) {
+  const match = String(dataUrl || '').match(/^data:(image\/(png|jpeg|webp|gif));base64,(.+)$/i);
+  if (!match) {
+    throw new Error('图片格式无效，仅支持 png/jpeg/webp/gif');
+  }
+
+  const mime = match[1].toLowerCase();
+  const ext = getExtByMime(mime);
+  const raw = match[3];
+  const buffer = Buffer.from(raw, 'base64');
+
+  if (!buffer.length) {
+    throw new Error('图片内容为空');
+  }
+
+  const maxBytes = 8 * 1024 * 1024;
+  if (buffer.length > maxBytes) {
+    throw new Error('图片过大，压缩后仍超过 8MB');
+  }
+
+  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const filepath = path.join(UPLOAD_DIR, filename);
+  fs.writeFileSync(filepath, buffer);
+  return filename;
 }
 
 function buildSystemMessage() {
@@ -216,6 +257,23 @@ app.post('/api/test', async (req, res) => {
   }
 });
 
+app.post('/api/upload-image', (req, res) => {
+  try {
+    const { dataUrl } = req.body || {};
+    if (!dataUrl) {
+      return res.status(400).json({ error: '缺少 dataUrl' });
+    }
+
+    const filename = saveBase64Image(dataUrl);
+    return res.json({ ok: true, url: `/uploads/${filename}` });
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message || '上传图片失败'
+    });
+  }
+});
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { presetId, messages = [], stream = true } = req.body || {};
@@ -281,6 +339,7 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+app.use('/uploads', express.static(UPLOAD_DIR));
 app.use(express.static(WEB_ROOT));
 
 app.get('*', (req, res) => {
