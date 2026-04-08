@@ -4,6 +4,7 @@ let currentPresetId = null;
 let sessions = JSON.parse(localStorage.getItem('easychat-sessions')) || [];
 let currentSessionId = localStorage.getItem('easychat-current-id') || null;
 let abortController = null;
+let pendingImageDataUrl = '';
 
 function saveSessions() {
   localStorage.setItem('easychat-sessions', JSON.stringify(sessions));
@@ -79,12 +80,11 @@ function renderBubbleContent(bubble, content) {
 }
 
 function updateImagePreview() {
-  const input = document.getElementById('image-url');
   const wrap = document.getElementById('image-preview-wrap');
   const img = document.getElementById('image-preview');
-  if (!input || !wrap || !img) return;
+  if (!wrap || !img) return;
 
-  const imageUrl = sanitizeImageUrl(input.value);
+  const imageUrl = sanitizeImageUrl(pendingImageDataUrl);
   if (!imageUrl) {
     img.removeAttribute('src');
     wrap.classList.add('hidden');
@@ -96,8 +96,7 @@ function updateImagePreview() {
 }
 
 function clearImageUrl() {
-  const input = document.getElementById('image-url');
-  if (input) input.value = '';
+  pendingImageDataUrl = '';
   updateImagePreview();
 }
 
@@ -115,8 +114,7 @@ function handleUserInputPaste(event) {
     reader.onload = () => {
       const dataUrl = sanitizeImageUrl(reader.result);
       if (!dataUrl) return;
-      const input = document.getElementById('image-url');
-      if (input) input.value = dataUrl;
+      pendingImageDataUrl = dataUrl;
       updateImagePreview();
       setStatus('已粘贴截图，可直接发送', 'success');
     };
@@ -226,7 +224,7 @@ function loadSession(id) {
 
   if (!session || session.history.length === 0) {
     container.innerHTML = `
-      <div id="welcome-view" class="text-center pt-2 pb-8">
+      <div id="welcome-view" class="text-center pt-0 pb-6">
         <h1 id="app-title" class="text-7xl font-black mb-4 tracking-tighter italic oops-gradient">${publicConfig?.appName || 'EasyChat'}</h1>
         <p class="text-slate-400 dark:text-slate-600 text-sm font-medium tracking-widest uppercase">Start Conversation</p>
       </div>
@@ -576,9 +574,8 @@ async function handleSend() {
   if (abortController) return;
 
   const input = document.getElementById('user-input');
-  const imageInput = document.getElementById('image-url');
   const text = input.value.trim();
-  const imageUrl = sanitizeImageUrl(imageInput?.value);
+  const imageUrl = sanitizeImageUrl(pendingImageDataUrl);
   const preset = getCurrentPreset();
 
   if ((!text && !imageUrl) || !preset) return;
@@ -595,7 +592,7 @@ async function handleSend() {
   setStatus(`已使用预设：${preset.name} / ${preset.model}`, 'info');
 
   input.value = '';
-  if (imageInput) imageInput.value = '';
+  pendingImageDataUrl = '';
   updateImagePreview();
   input.style.height = 'auto';
 
@@ -688,7 +685,6 @@ async function init() {
     localStorage.setItem('easychat-admin-password', event.target.value);
   });
 
-  document.getElementById('image-url')?.addEventListener('input', updateImagePreview);
   document.getElementById('user-input')?.addEventListener('paste', handleUserInputPaste);
   updateImagePreview();
 

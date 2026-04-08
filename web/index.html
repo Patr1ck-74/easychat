@@ -121,9 +121,9 @@
       </svg>
     </button>
 
-    <main id="chat-box" class="flex-1 overflow-y-auto no-scrollbar pt-24 pb-36">
+    <main id="chat-box" class="flex-1 overflow-y-auto no-scrollbar pt-10 pb-36">
       <div class="max-w-4xl mx-auto px-6 space-y-12">
-        <div id="welcome-view" class="text-center pt-2 pb-8">
+        <div id="welcome-view" class="text-center pt-0 pb-6">
           <h1 id="app-title" class="text-7xl font-black mb-4 tracking-tighter italic oops-gradient">EasyChat</h1>
           <p class="text-slate-400 dark:text-slate-600 text-sm font-medium tracking-widest uppercase">Intelligent Terminal</p>
         </div>
@@ -133,8 +133,8 @@
     <footer class="fixed bottom-0 left-0 w-full pb-8 pt-4 footer-clear">
       <div class="max-w-4xl mx-auto px-6">
         <div class="relative bg-white/70 dark:bg-darkCard/70 backdrop-blur-md rounded-[30px] p-2 shadow-2xl border border-white/20 dark:border-slate-800 focus-within:ring-2 focus-within:ring-blue-500 transition-all duration-300">
-          <div class="flex items-center gap-2 px-3 pt-2 pb-1">
-            <input id="image-url" type="text" placeholder="Image URL / 或在输入框 Ctrl+V 粘贴截图" class="flex-1 bg-transparent text-xs text-slate-600 dark:text-slate-300 outline-none" />
+          <div class="flex items-center justify-between gap-2 px-3 pt-2 pb-1">
+            <div class="text-xs text-slate-500 dark:text-slate-400">在下方聊天输入框按 Ctrl+V 粘贴截图</div>
             <button onclick="clearImageUrl()" class="text-[10px] text-slate-400 hover:text-red-500 transition">清除图片</button>
           </div>
           <div id="image-preview-wrap" class="hidden px-3 pb-2">
