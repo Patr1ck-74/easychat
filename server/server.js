@@ -122,6 +122,52 @@ function getExtByMime(mime) {
   return map[mime] || '';
 }
 
+function getPublicBaseUrl(req) {
+  const fromEnv = normalizeBaseUrl(process.env.PUBLIC_BASE_URL || '');
+  if (fromEnv) return fromEnv;
+
+  const proto = req.headers['x-forwarded-proto']?.toString().split(',')[0]?.trim() || req.protocol;
+  const host = req.headers['x-forwarded-host']?.toString().split(',')[0]?.trim() || req.get('host');
+  return normalizeBaseUrl(`${proto}://${host}`);
+}
+
+function toAbsoluteImageUrl(imageUrl, req) {
+  const value = String(imageUrl || '').trim();
+  if (!value) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('/uploads/')) return `${getPublicBaseUrl(req)}${value}`;
+  return value;
+}
+
+function normalizeUpstreamMessages(messages, req) {
+  return messages.map((msg) => {
+    if (!Array.isArray(msg?.content)) return msg;
+
+    return {
+      ...msg,
+      content: msg.content.map((part) => {
+        if (!part || part.type !== 'image_url') return part;
+
+        if (typeof part.image_url === 'string') {
+          return { ...part, image_url: toAbsoluteImageUrl(part.image_url, req) };
+        }
+
+        if (part.image_url && typeof part.image_url === 'object') {
+          return {
+            ...part,
+            image_url: {
+              ...part.image_url,
+              url: toAbsoluteImageUrl(part.image_url.url, req)
+            }
+          };
+        }
+
+        return part;
+      })
+    };
+  });
+}
+
 function saveBase64Image(dataUrl) {
   const match = String(dataUrl || '').match(/^data:(image\/(png|jpeg|webp|gif));base64,(.+)$/i);
   if (!match) {
@@ -265,7 +311,9 @@ app.post('/api/upload-image', (req, res) => {
     }
 
     const filename = saveBase64Image(dataUrl);
-    return res.json({ ok: true, url: `/uploads/${filename}` });
+    const relativeUrl = `/uploads/${filename}`;
+    const absoluteUrl = `${getPublicBaseUrl(req)}${relativeUrl}`;
+    return res.json({ ok: true, url: absoluteUrl, relativeUrl });
   } catch (error) {
     return res.status(400).json({
       ok: false,
@@ -288,6 +336,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const url = `${normalizeBaseUrl(preset.baseUrl)}/chat/completions`;
+    const upstreamMessages = normalizeUpstreamMessages(messages, req);
 
     const upstream = await fetch(url, {
       method: 'POST',
@@ -297,7 +346,7 @@ app.post('/api/chat', async (req, res) => {
       },
       body: JSON.stringify({
         model: preset.model,
-        messages: [buildSystemMessage(), ...messages],
+        messages: [buildSystemMessage(), ...upstreamMessages],
         stream: Boolean(stream)
       })
     });
