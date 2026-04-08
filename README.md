@@ -1,56 +1,56 @@
 # EasyChat
 
-简洁的聊天前端 + Node.js 代理服务，默认端口 `7777`。
+轻量聊天 UI + Node.js 代理服务（默认端口 `7777`）。
 
-## 快速开始（Docker，固定镜像）
+## 功能
 
-固定使用：
+- 多模型预设（在线管理）
+- 流式回复
+- 粘贴截图（Ctrl+V）直接识图
+- 服务端保存 API Key（前端不直连模型厂商）
 
-`ghcr.io/patr1ck-74/easychat:latest`
+## Docker 运行
 
-### 1) 启动容器
+### 1) 启动
 
 ```bash
-docker pull ghcr.io/patr1ck-74/easychat:latest
 docker run -d \
   --name easychat \
   -p 7777:7777 \
   -e EASYCHAT_ADMIN_PASSWORD=change-this-password \
-  -v /opt/easychat/presets.json:/app/server/presets.json \
+  -e CONFIG_PATH=/data/presets.json \
+  -e PUBLIC_BASE_URL=https://你的域名 \
+  -v easychat-data:/data \
   --restart unless-stopped \
   ghcr.io/patr1ck-74/easychat:latest
 ```
 
-### 2) 打开页面
+说明：
 
-访问：`http://你的服务器IP:7777`
+- `CONFIG_PATH=/data/presets.json`：配置持久化到 volume
+- `PUBLIC_BASE_URL`：用于图片识图场景生成可访问的绝对地址（建议配置）
 
-### 3) 首次配置
-
-1. 打开设置（齿轮）
-2. 输入 `Admin Password`（即 `EASYCHAT_ADMIN_PASSWORD`）
-3. 点击“加载配置”
-4. 填写 `Base URL / Model / API Key`
-5. 保存并测试
-
----
-
-## Docker Compose（固定镜像）
+### 2) 更新
 
 ```bash
-docker compose up -d
+docker pull ghcr.io/patr1ck-74/easychat:latest
+docker stop easychat
+docker rm easychat
+# 然后用上面的 docker run 原命令重新启动
 ```
 
-默认读取项目里的 `docker-compose.yml`，已固定为：
+### 3) 查看日志
 
-`ghcr.io/patr1ck-74/easychat:latest`
+```bash
+docker logs -f easychat
+```
 
-使用前请修改：
+## 首次使用
 
-- `EASYCHAT_ADMIN_PASSWORD`
-- 配置文件挂载路径（建议改成你自己的路径）
-
----
+1. 打开页面：`http://你的服务器IP:7777`
+2. 点击齿轮，输入 `Admin Password`
+3. 加载配置并填写 `Base URL / Model / API Key`
+4. 保存后测试连通性
 
 ## 本地开发（可选）
 
@@ -61,10 +61,8 @@ $env:EASYCHAT_ADMIN_PASSWORD="change-this-password"
 node server.js
 ```
 
----
+## 注意
 
-## 安全提示
-
-- 不要提交真实配置文件（`server/presets.json`）
-- API Key 只保存在服务端
-- 前端不会直接暴露第三方 API Key
+- `server/presets.json` 不要提交到仓库
+- 对话历史默认保存在浏览器本地（localStorage）
+- 容器重建不会影响 `/data/presets.json`
