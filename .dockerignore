@@ -6,4 +6,5 @@ Dockerfile
 .dockerignore
 .github
 server/node_modules
+server/presets.json
 server/presets.local.json

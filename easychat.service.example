@@ -12,6 +12,7 @@ RestartSec=3
 Environment=NODE_ENV=production
 Environment=PORT=7777
 Environment=HOST=127.0.0.1
+Environment=EASYCHAT_ADMIN_PASSWORD=change-this-password
 
 [Install]
 WantedBy=multi-user.target

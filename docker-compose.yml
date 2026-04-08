@@ -7,6 +7,8 @@ services:
     container_name: easychat
     ports:
       - "7777:7777"
+    environment:
+      EASYCHAT_ADMIN_PASSWORD: change-this-password
     restart: unless-stopped
     volumes:
-      - ./server/presets.json:/app/server/presets.json:ro
+      - ./server/presets.json:/app/server/presets.json

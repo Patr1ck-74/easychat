@@ -1,4 +1,5 @@
 let publicConfig = null;
+let adminConfig = null;
 let currentPresetId = null;
 let sessions = JSON.parse(localStorage.getItem('easychat-sessions')) || [];
 let currentSessionId = localStorage.getItem('easychat-current-id') || null;
@@ -15,6 +16,10 @@ function sanitizeHtml(html) {
 
 function markdownToHtml(content) {
   return sanitizeHtml(marked.parse(content || ''));
+}
+
+function getAdminPassword() {
+  return document.getElementById('admin-password').value.trim();
 }
 
 function getCurrentSession() {
@@ -187,6 +192,214 @@ function renderBubble(role, content) {
   return bubble;
 }
 
+function randomId(prefix = 'preset') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function setAdminPanelVisible(visible) {
+  document.getElementById('admin-panel').classList.toggle('hidden', !visible);
+}
+
+function renderAdminPanel() {
+  if (!adminConfig) {
+    setAdminPanelVisible(false);
+    return;
+  }
+
+  setAdminPanelVisible(true);
+  document.getElementById('app-name-input').value = adminConfig.appName || '';
+  document.getElementById('background-image-input').value = adminConfig.backgroundImage || '';
+
+  const container = document.getElementById('admin-presets');
+  container.innerHTML = '';
+
+  adminConfig.presets.forEach((preset, index) => {
+    const card = document.createElement('div');
+    card.className = 'p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 space-y-3';
+    card.innerHTML = `
+      <div class="flex items-center justify-between gap-3">
+        <label class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+          <input type="radio" name="default-preset" ${adminConfig.defaultPresetId === preset.id ? 'checked' : ''} onchange="setDefaultPreset('${preset.id}')">
+          默认预设
+        </label>
+        <button onclick="deleteAdminPreset('${preset.id}')" class="text-xs text-red-500 hover:underline">删除</button>
+      </div>
+      <input data-field="name" data-id="${preset.id}" value="${escapeHtml(preset.name)}" placeholder="Preset Name" class="admin-input w-full p-3 bg-white/70 dark:bg-slate-950/50 border dark:border-slate-700 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+      <input data-field="baseUrl" data-id="${preset.id}" value="${escapeHtml(preset.baseUrl)}" placeholder="https://api.openai.com/v1" class="admin-input w-full p-3 bg-white/70 dark:bg-slate-950/50 border dark:border-slate-700 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+      <input data-field="model" data-id="${preset.id}" value="${escapeHtml(preset.model)}" placeholder="gpt-4o" class="admin-input w-full p-3 bg-white/70 dark:bg-slate-950/50 border dark:border-slate-700 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+      <input data-field="apiKey" data-id="${preset.id}" value="${escapeHtml(preset.apiKey)}" placeholder="sk-..." class="admin-input w-full p-3 bg-white/70 dark:bg-slate-950/50 border dark:border-slate-700 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+      <div class="text-[10px] text-slate-400">Preset ${index + 1}</div>
+    `;
+    container.appendChild(card);
+  });
+
+  document.querySelectorAll('.admin-input').forEach((input) => {
+    input.addEventListener('input', (event) => {
+      const { id, field } = event.target.dataset;
+      updateAdminPreset(id, field, event.target.value);
+    });
+  });
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function updateAdminPreset(id, field, value) {
+  if (!adminConfig) return;
+  const preset = adminConfig.presets.find((item) => item.id === id);
+  if (!preset) return;
+  preset[field] = value;
+}
+
+function setDefaultPreset(id) {
+  if (!adminConfig) return;
+  adminConfig.defaultPresetId = id;
+}
+
+function addAdminPreset() {
+  if (!adminConfig) {
+    setStatus('请先加载管理配置', 'info');
+    return;
+  }
+
+  adminConfig.presets.push({
+    id: randomId(),
+    name: 'New Preset',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+    apiKey: ''
+  });
+
+  renderAdminPanel();
+}
+
+function deleteAdminPreset(id) {
+  if (!adminConfig) return;
+  if (adminConfig.presets.length === 1) {
+    setStatus('至少保留一个预设', 'error');
+    return;
+  }
+
+  adminConfig.presets = adminConfig.presets.filter((preset) => preset.id !== id);
+  if (adminConfig.defaultPresetId === id) {
+    adminConfig.defaultPresetId = adminConfig.presets[0]?.id || '';
+  }
+  renderAdminPanel();
+}
+
+function collectAdminForm() {
+  if (!adminConfig) return null;
+  return {
+    appName: document.getElementById('app-name-input').value.trim(),
+    backgroundImage: document.getElementById('background-image-input').value.trim(),
+    defaultPresetId: adminConfig.defaultPresetId,
+    presets: adminConfig.presets.map((preset) => ({
+      id: String(preset.id || '').trim(),
+      name: String(preset.name || '').trim(),
+      baseUrl: String(preset.baseUrl || '').trim(),
+      model: String(preset.model || '').trim(),
+      apiKey: String(preset.apiKey || '').trim()
+    }))
+  };
+}
+
+async function loadAdminConfig() {
+  const password = getAdminPassword();
+  if (!password) {
+    setStatus('请先输入管理密码', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/config', {
+      headers: {
+        'x-admin-password': password
+      }
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    adminConfig = data;
+    renderAdminPanel();
+    setStatus('管理配置已加载', 'success');
+  } catch (error) {
+    adminConfig = null;
+    renderAdminPanel();
+    setStatus(`加载管理配置失败：${error.message}`, 'error');
+  }
+}
+
+async function saveAdminConfig() {
+  const password = getAdminPassword();
+  if (!password) {
+    setStatus('请先输入管理密码', 'error');
+    return;
+  }
+
+  const payload = collectAdminForm();
+  if (!payload) {
+    setStatus('请先加载管理配置', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/admin/config', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-admin-password': password
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    adminConfig = data.config;
+    renderAdminPanel();
+    await refreshPublicConfig();
+    setStatus('配置已保存，前端预设已刷新', 'success');
+  } catch (error) {
+    setStatus(`保存配置失败：${error.message}`, 'error');
+  }
+}
+
+async function refreshPublicConfig() {
+  const res = await fetch('/api/config');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  publicConfig = await res.json();
+
+  document.title = publicConfig.appName || 'EasyChat AI';
+  const appTitle = document.getElementById('app-title');
+  if (appTitle) appTitle.textContent = publicConfig.appName || 'EasyChat';
+
+  document.getElementById('dynamic-bg').style.backgroundImage = publicConfig.backgroundImage
+    ? `url('${publicConfig.backgroundImage}')`
+    : 'none';
+
+  const storedPresetId = localStorage.getItem('easychat-preset-id');
+  const availablePresetIds = publicConfig.presets.map((preset) => preset.id);
+  currentPresetId = availablePresetIds.includes(currentPresetId)
+    ? currentPresetId
+    : availablePresetIds.includes(storedPresetId)
+      ? storedPresetId
+      : publicConfig.defaultPresetId || publicConfig.presets[0]?.id;
+
+  localStorage.setItem('easychat-preset-id', currentPresetId || '');
+  renderPresetTabs();
+  updatePresetInfo();
+}
+
 async function testConnection() {
   const indicator = document.getElementById('test-indicator');
   const preset = getCurrentPreset();
@@ -346,26 +559,17 @@ async function init() {
     document.documentElement.classList.add('dark');
   }
 
+  const savedAdminPassword = localStorage.getItem('easychat-admin-password');
+  if (savedAdminPassword) {
+    document.getElementById('admin-password').value = savedAdminPassword;
+  }
+
+  document.getElementById('admin-password').addEventListener('change', (event) => {
+    localStorage.setItem('easychat-admin-password', event.target.value);
+  });
+
   try {
-    const res = await fetch('/api/config');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    publicConfig = await res.json();
-
-    document.title = publicConfig.appName || 'EasyChat AI';
-    const appTitle = document.getElementById('app-title');
-    if (appTitle) appTitle.textContent = publicConfig.appName || 'EasyChat';
-
-    if (publicConfig.backgroundImage) {
-      document.getElementById('dynamic-bg').style.backgroundImage = `url('${publicConfig.backgroundImage}')`;
-    }
-
-    const storedPresetId = localStorage.getItem('easychat-preset-id');
-    currentPresetId = publicConfig.presets.some((p) => p.id === storedPresetId)
-      ? storedPresetId
-      : publicConfig.defaultPresetId || publicConfig.presets[0]?.id;
-
-    renderPresetTabs();
-    updatePresetInfo();
+    await refreshPublicConfig();
 
     if (sessions.length === 0) {
       createNewChat();
@@ -387,6 +591,11 @@ window.clearAllData = clearAllData;
 window.createNewChat = createNewChat;
 window.deleteSession = deleteSession;
 window.testConnection = testConnection;
+window.loadAdminConfig = loadAdminConfig;
+window.saveAdminConfig = saveAdminConfig;
+window.addAdminPreset = addAdminPreset;
+window.deleteAdminPreset = deleteAdminPreset;
+window.setDefaultPreset = setDefaultPreset;
 
 window.onload = init;
 

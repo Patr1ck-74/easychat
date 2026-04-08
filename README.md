@@ -1,14 +1,14 @@
 # EasyChat
 
-一个可直接部署的轻量 AI 聊天项目：
+轻量的 AI 聊天项目，支持：
 
-- 前端：纯静态 HTML + Tailwind + marked + highlight.js
-- 后端：Express 代理 OpenAI 兼容接口
-- 默认端口：`7777`
-- 安全：真实 API Key 仅保存在后端 `server/presets.json`
-- 背景图：全局统一
-- 支持 Docker 部署
-- 支持 GitHub Actions 自动构建 Docker 镜像
+- 前端聊天 UI
+- Express 代理 OpenAI 兼容接口
+- 默认端口 `7777`
+- Docker / Docker Compose 部署
+- GitHub Actions 自动构建 Docker 镜像
+- 在线管理员配置：可在网页中填写和保存 `API Key`、`Base URL`、`Model`
+- 配置模板：仓库提供 `server/presets.example.json`
 
 ## 目录结构
 
@@ -20,7 +20,8 @@ easychat/
   server/
     package.json
     server.js
-    presets.json
+    presets.example.json
+    presets.json               # 本地/服务器实际配置，不建议提交
   web/
     index.html
     app.js
@@ -31,6 +32,43 @@ easychat/
   easychat.service.example
 ```
 
+## 配置说明
+
+### 1. 配置模板
+
+仓库内提供模板：
+
+```text
+server/presets.example.json
+```
+
+首次运行时：
+
+- 如果 `server/presets.json` 不存在
+- 后端会自动从 `server/presets.example.json` 复制出一份 `server/presets.json`
+
+### 2. 实际配置文件
+
+实际运行配置使用：
+
+```text
+server/presets.json
+```
+
+该文件已加入 `.gitignore`，不建议提交到公开仓库。
+
+### 3. 管理员密码
+
+在线配置功能依赖环境变量：
+
+```text
+EASYCHAT_ADMIN_PASSWORD
+```
+
+只有输入正确管理密码后，前端设置面板才能加载和保存完整配置。
+
+---
+
 ## 本地启动
 
 ### 1. 安装依赖
@@ -40,22 +78,13 @@ cd D:\github\easychat\server
 npm install
 ```
 
-### 2. 修改后端配置
+### 2. 设置管理员密码
 
-编辑：
+PowerShell 临时设置：
 
-```text
-D:\github\easychat\server\presets.json
+```powershell
+$env:EASYCHAT_ADMIN_PASSWORD="change-this-password"
 ```
-
-把里面的：
-
-- `apiKey`
-- `baseUrl`
-- `model`
-- `backgroundImage`
-
-改成你自己的。
 
 ### 3. 启动后端
 
@@ -64,17 +93,59 @@ cd D:\github\easychat\server
 node server.js
 ```
 
-默认监听：
+默认访问地址：
 
 ```text
 http://127.0.0.1:7777
 ```
 
-## Debian 服务器部署
+---
 
-### 1. 上传项目到服务器
+## 部署后怎么使用
 
-建议路径：
+部署完成后，直接访问：
+
+```text
+http://你的服务器IP:7777
+```
+
+如果你后续用了反向代理或域名，也只是把这个端口代理出去即可。
+
+### 首次使用步骤
+
+1. 打开网页
+2. 点击左上角齿轮进入 Settings
+3. 在 `Admin Password` 中输入你部署时设置的管理密码
+4. 点击 `加载配置`
+5. 在管理面板中填写：
+   - `App Name`
+   - `Background Image URL`
+   - 每个 preset 的：
+     - `Preset Name`
+     - `Base URL`
+     - `Model`
+     - `API Key`
+6. 选择一个默认 preset
+7. 点击 `保存配置`
+8. 再点击 `测试当前预设`
+9. 成功后直接聊天
+
+### 聊天使用说明
+
+保存配置后：
+
+- 左侧会显示你已保存的 preset
+- 切换 preset 即可切换模型/服务商
+- 前端不会暴露第三方真实 API Key
+- 浏览器 F12 只能看到你自己的后端请求
+
+---
+
+## Debian 部署
+
+### 1. 上传项目
+
+建议目录：
 
 ```text
 /opt/easychat
@@ -89,20 +160,22 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
 
-### 3. 安装后端依赖
+### 3. 安装依赖
 
 ```bash
 cd /opt/easychat/server
 sudo npm install
 ```
 
-### 4. 修改后端配置
+### 4. 准备配置文件
 
-编辑：
+如果你想手动准备，可以执行：
 
-```text
-/opt/easychat/server/presets.json
+```bash
+cp /opt/easychat/server/presets.example.json /opt/easychat/server/presets.json
 ```
+
+也可以不手动复制，首次启动时程序会自动生成。
 
 ### 5. 安装 systemd 服务
 
@@ -125,32 +198,68 @@ journalctl -u easychat -f
 127.0.0.1:7777
 ```
 
+请记得修改：
+
+```text
+/etc/systemd/system/easychat.service
+```
+
+中的：
+
+```text
+Environment=EASYCHAT_ADMIN_PASSWORD=change-this-password
+```
+
+改成你自己的管理密码，然后重启：
+
+```bash
+sudo systemctl restart easychat
+```
+
+---
+
 ## Docker 部署
 
 ### 方式 1：直接构建并运行
 
 ```bash
 cd /opt/easychat
+cp server/presets.example.json server/presets.json
 docker build -t easychat:latest .
 docker run -d \
   --name easychat \
   -p 7777:7777 \
-  -v /opt/easychat/server/presets.json:/app/server/presets.json:ro \
+  -e EASYCHAT_ADMIN_PASSWORD=change-this-password \
+  -v /opt/easychat/server/presets.json:/app/server/presets.json \
   easychat:latest
 ```
 
 ### 方式 2：使用 Docker Compose
 
-先确认服务器上的配置文件存在：
-
-```text
-/opt/easychat/server/presets.json
-```
-
-然后执行：
+先准备配置文件：
 
 ```bash
 cd /opt/easychat
+cp server/presets.example.json server/presets.json
+```
+
+然后修改：
+
+```text
+docker-compose.yml
+```
+
+把：
+
+```text
+EASYCHAT_ADMIN_PASSWORD: change-this-password
+```
+
+改成你自己的密码。
+
+启动：
+
+```bash
 docker compose up -d --build
 ```
 
@@ -165,6 +274,8 @@ docker compose logs -f
 ```bash
 docker compose down
 ```
+
+---
 
 ## GitHub Actions 自动打包镜像
 
@@ -204,21 +315,23 @@ ghcr.io/<repository-owner-lowercase>/easychat
 - Actions 权限允许 `Read and write permissions`
 - Packages 权限允许写入
 
-生成后镜像名类似：
-
-```text
-ghcr.io/<your-username-lowercase>/easychat:latest
-```
+---
 
 ## 安全说明
 
-- 前端不会存真实 API Key
-- 浏览器 F12 看不到第三方密钥
-- 真正的密钥只在 `server/presets.json`
-- 不要把 `presets.json` 提交到公开仓库
+- 真实 API Key 保存于服务端 `server/presets.json`
+- 在线配置需要管理密码
+- 前端不会直接请求第三方模型接口
+- 浏览器 F12 看不到第三方真实密钥
+- 不要把 `server/presets.json` 提交到公开仓库
 
-## 后续建议
+---
 
-- 给站点加访问鉴权
-- 给 `/api/chat` 加登录或访问限制
-- 用数据库替代 `presets.json`
+## 建议
+
+如果要正式公网使用，建议额外加：
+
+- 访问鉴权
+- IP 限制
+- 请求频率限制
+- 后端日志与备份
