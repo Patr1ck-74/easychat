@@ -24,7 +24,8 @@
   </script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; transition: background 0.3s ease; position: relative; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; transition: background 0.3s ease; position: relative; user-select: none; -webkit-user-select: none; }
+    input, textarea { user-select: text; -webkit-user-select: text; }
     #dynamic-bg { position: fixed; inset: 0; z-index: -1; background-size: cover; background-position: center; transition: background-image 0.5s ease-in-out; filter: brightness(0.95); }
     .dark #dynamic-bg { filter: brightness(0.35); }
     .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -122,7 +123,7 @@
 
     <main id="chat-box" class="flex-1 overflow-y-auto no-scrollbar pt-24 pb-36">
       <div class="max-w-4xl mx-auto px-6 space-y-12">
-        <div id="welcome-view" class="text-center py-32">
+        <div id="welcome-view" class="text-center pt-2 pb-8">
           <h1 id="app-title" class="text-7xl font-black mb-4 tracking-tighter italic oops-gradient">EasyChat</h1>
           <p class="text-slate-400 dark:text-slate-600 text-sm font-medium tracking-widest uppercase">Intelligent Terminal</p>
         </div>
@@ -131,12 +132,21 @@
 
     <footer class="fixed bottom-0 left-0 w-full pb-8 pt-4 footer-clear">
       <div class="max-w-4xl mx-auto px-6">
-        <div class="relative flex items-end gap-2 bg-white/70 dark:bg-darkCard/70 backdrop-blur-md rounded-[30px] p-2 shadow-2xl border border-white/20 dark:border-slate-800 focus-within:ring-2 focus-within:ring-blue-500 transition-all duration-300">
-          <textarea id="user-input" rows="1" class="flex-1 bg-transparent px-4 py-3 outline-none resize-none max-h-40 text-slate-700 dark:text-slate-200" placeholder="Ask anything..."></textarea>
-          <button id="stop-btn" class="hidden p-4 bg-slate-700 text-white rounded-full hover:bg-slate-800 transition-all">■</button>
-          <button id="send-btn" class="p-4 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg shadow-blue-500/30 active:scale-90 transition-all">
-            <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M2.3 20.27L22.18 12 2.3 3.73a.75.75 0 0 0-1.04.88L4.35 12l-3.1 7.39a.75.75 0 0 0 1.05.88z"/></svg>
-          </button>
+        <div class="relative bg-white/70 dark:bg-darkCard/70 backdrop-blur-md rounded-[30px] p-2 shadow-2xl border border-white/20 dark:border-slate-800 focus-within:ring-2 focus-within:ring-blue-500 transition-all duration-300">
+          <div class="flex items-center gap-2 px-3 pt-2 pb-1">
+            <input id="image-url" type="text" placeholder="Image URL / 或在输入框 Ctrl+V 粘贴截图" class="flex-1 bg-transparent text-xs text-slate-600 dark:text-slate-300 outline-none" />
+            <button onclick="clearImageUrl()" class="text-[10px] text-slate-400 hover:text-red-500 transition">清除图片</button>
+          </div>
+          <div id="image-preview-wrap" class="hidden px-3 pb-2">
+            <img id="image-preview" alt="pasted-image-preview" class="max-h-28 rounded-lg border border-slate-200 dark:border-slate-700" />
+          </div>
+          <div class="flex items-end gap-2">
+            <textarea id="user-input" rows="1" class="flex-1 bg-transparent px-4 py-3 outline-none resize-none max-h-40 text-slate-700 dark:text-slate-200" placeholder="Ask anything..."></textarea>
+            <button id="stop-btn" class="hidden p-4 bg-slate-700 text-white rounded-full hover:bg-slate-800 transition-all">■</button>
+            <button id="send-btn" class="p-4 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg shadow-blue-500/30 active:scale-90 transition-all">
+              <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M2.3 20.27L22.18 12 2.3 3.73a.75.75 0 0 0-1.04.88L4.35 12l-3.1 7.39a.75.75 0 0 0 1.05.88z"/></svg>
+            </button>
+          </div>
         </div>
         <div id="loading-tag" class="hidden mt-2 text-center text-[10px] font-bold text-blue-500 tracking-[0.2em] uppercase animate-pulse">Assistant is typing</div>
       </div>

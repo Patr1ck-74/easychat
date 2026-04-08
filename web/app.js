@@ -18,6 +18,114 @@ function markdownToHtml(content) {
   return sanitizeHtml(marked.parse(content || ''));
 }
 
+function sanitizeImageUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^data:image\//i.test(value)) return value;
+  return '';
+}
+
+function extractImageUrl(part) {
+  if (!part || part.type !== 'image_url') return '';
+  if (typeof part.image_url === 'string') return sanitizeImageUrl(part.image_url);
+  if (part.image_url && typeof part.image_url === 'object') {
+    return sanitizeImageUrl(part.image_url.url);
+  }
+  return '';
+}
+
+function normalizeMessageContent(content) {
+  if (Array.isArray(content)) {
+    const textParts = [];
+    const images = [];
+
+    content.forEach((part) => {
+      if (!part) return;
+      if (part.type === 'text' && part.text) textParts.push(String(part.text));
+      const imageUrl = extractImageUrl(part);
+      if (imageUrl) images.push(imageUrl);
+    });
+
+    return {
+      text: textParts.join('\n\n').trim(),
+      images
+    };
+  }
+
+  return {
+    text: String(content || ''),
+    images: []
+  };
+}
+
+function renderBubbleContent(bubble, content) {
+  const normalized = normalizeMessageContent(content);
+  bubble.innerHTML = '';
+
+  if (normalized.text) {
+    const textBlock = document.createElement('div');
+    textBlock.innerHTML = markdownToHtml(normalized.text);
+    bubble.appendChild(textBlock);
+  }
+
+  normalized.images.forEach((url) => {
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = 'user-image';
+    img.className = 'mt-3 rounded-xl max-h-72 w-auto border border-white/20 dark:border-slate-700';
+    bubble.appendChild(img);
+  });
+}
+
+function updateImagePreview() {
+  const input = document.getElementById('image-url');
+  const wrap = document.getElementById('image-preview-wrap');
+  const img = document.getElementById('image-preview');
+  if (!input || !wrap || !img) return;
+
+  const imageUrl = sanitizeImageUrl(input.value);
+  if (!imageUrl) {
+    img.removeAttribute('src');
+    wrap.classList.add('hidden');
+    return;
+  }
+
+  img.src = imageUrl;
+  wrap.classList.remove('hidden');
+}
+
+function clearImageUrl() {
+  const input = document.getElementById('image-url');
+  if (input) input.value = '';
+  updateImagePreview();
+}
+
+function handleUserInputPaste(event) {
+  const items = event.clipboardData?.items;
+  if (!items || !items.length) return;
+
+  for (const item of items) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+
+    const file = item.getAsFile();
+    if (!file) continue;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = sanitizeImageUrl(reader.result);
+      if (!dataUrl) return;
+      const input = document.getElementById('image-url');
+      if (input) input.value = dataUrl;
+      updateImagePreview();
+      setStatus('已粘贴截图，可直接发送', 'success');
+    };
+    reader.readAsDataURL(file);
+    event.preventDefault();
+    return;
+  }
+}
+
 function getAdminPassword() {
   return document.getElementById('admin-password').value.trim();
 }
@@ -118,7 +226,7 @@ function loadSession(id) {
 
   if (!session || session.history.length === 0) {
     container.innerHTML = `
-      <div id="welcome-view" class="text-center py-32">
+      <div id="welcome-view" class="text-center pt-2 pb-8">
         <h1 id="app-title" class="text-7xl font-black mb-4 tracking-tighter italic oops-gradient">${publicConfig?.appName || 'EasyChat'}</h1>
         <p class="text-slate-400 dark:text-slate-600 text-sm font-medium tracking-widest uppercase">Start Conversation</p>
       </div>
@@ -181,7 +289,7 @@ function renderBubble(role, content) {
       : 'bg-white/70 dark:bg-darkCard/70 backdrop-blur-md text-slate-800 dark:text-slate-200 border border-white/10 dark:border-slate-800 shadow-sm rounded-tl-none'
   } prose dark:prose-invert prose-sm leading-relaxed`;
 
-  bubble.innerHTML = markdownToHtml(content);
+  renderBubbleContent(bubble, content);
   div.innerHTML = `<span class="text-[9px] font-bold text-slate-400 dark:text-slate-600 uppercase tracking-widest mb-2 px-2">${role}</span>`;
   div.appendChild(bubble);
   container.appendChild(div);
@@ -468,10 +576,12 @@ async function handleSend() {
   if (abortController) return;
 
   const input = document.getElementById('user-input');
+  const imageInput = document.getElementById('image-url');
   const text = input.value.trim();
+  const imageUrl = sanitizeImageUrl(imageInput?.value);
   const preset = getCurrentPreset();
 
-  if (!text || !preset) return;
+  if ((!text && !imageUrl) || !preset) return;
 
   let session = getCurrentSession();
   if (!session) {
@@ -485,15 +595,25 @@ async function handleSend() {
   setStatus(`已使用预设：${preset.name} / ${preset.model}`, 'info');
 
   input.value = '';
+  if (imageInput) imageInput.value = '';
+  updateImagePreview();
   input.style.height = 'auto';
 
+  const userContent = imageUrl
+    ? [
+        ...(text ? [{ type: 'text', text }] : []),
+        { type: 'image_url', image_url: { url: imageUrl } }
+      ]
+    : text;
+
   if (session.history.length === 0) {
-    session.title = text.substring(0, 24);
+    const titleBase = text || 'Image Chat';
+    session.title = titleBase.substring(0, 24);
     renderHistoryList();
   }
 
-  renderBubble('user', text);
-  session.history.push({ role: 'user', content: text });
+  renderBubble('user', userContent);
+  session.history.push({ role: 'user', content: userContent });
 
   const aiBubble = renderBubble('assistant', '');
   aiBubble.classList.add('typing');
@@ -523,7 +643,7 @@ async function handleSend() {
 
     await readSSEStream(response, (delta) => {
       full += delta;
-      aiBubble.innerHTML = markdownToHtml(full);
+      renderBubbleContent(aiBubble, full);
       document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
     });
 
@@ -568,6 +688,10 @@ async function init() {
     localStorage.setItem('easychat-admin-password', event.target.value);
   });
 
+  document.getElementById('image-url')?.addEventListener('input', updateImagePreview);
+  document.getElementById('user-input')?.addEventListener('paste', handleUserInputPaste);
+  updateImagePreview();
+
   try {
     await refreshPublicConfig();
 
@@ -596,6 +720,7 @@ window.saveAdminConfig = saveAdminConfig;
 window.addAdminPreset = addAdminPreset;
 window.deleteAdminPreset = deleteAdminPreset;
 window.setDefaultPreset = setDefaultPreset;
+window.clearImageUrl = clearImageUrl;
 
 window.onload = init;
 
