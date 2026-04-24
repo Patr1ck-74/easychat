@@ -27,8 +27,20 @@ async function readJsonResponse(response) {
   try {
     return text ? JSON.parse(text) : {};
   } catch (_) {
-    throw new Error(text ? `服务端返回了非 JSON 内容：${text.slice(0, 120)}` : '服务端返回空内容');
+    const statusText = response?.status ? `HTTP ${response.status}` : '服务端响应异常';
+    throw new Error(text ? `${statusText}，且返回了非 JSON 内容：${text.slice(0, 120)}` : `${statusText}，但响应体为空`);
   }
+}
+
+async function readJsonResponseOrThrow(response, fallbackMessage = '请求失败') {
+  const data = await readJsonResponse(response);
+  if (!response.ok) {
+    const detailMessage = typeof data?.details === 'string'
+      ? data.details
+      : data?.details?.error?.message || data?.details?.message || JSON.stringify(data?.details || '');
+    throw new Error(detailMessage || data?.message || data?.error || `${fallbackMessage}：HTTP ${response.status}`);
+  }
+  return data;
 }
 
 function formatElapsed(ms) {
@@ -132,7 +144,7 @@ async function loadSessionsFromServer() {
     });
     if (!res.ok) return;
 
-    const data = await res.json();
+    const data = await readJsonResponse(res);
     const remoteSessions = Array.isArray(data?.sessions) ? data.sessions : [];
     const remoteCurrentId = String(data?.currentSessionId || '').trim();
 
@@ -371,7 +383,7 @@ async function uploadImageDataUrl(dataUrl) {
     body: JSON.stringify({ dataUrl })
   });
 
-  const data = await res.json();
+  const data = await readJsonResponse(res);
   if (!res.ok || !data?.ok || !data?.url) {
     throw new Error(data?.error || `上传失败 HTTP ${res.status}`);
   }
@@ -894,10 +906,7 @@ async function loadAdminConfig() {
       }
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
-    }
+    const data = await readJsonResponseOrThrow(res, '加载管理配置失败');
 
     adminConfig = data;
     renderAdminPanel();
@@ -932,10 +941,7 @@ async function saveAdminConfig() {
       body: JSON.stringify(payload)
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
-    }
+    const data = await readJsonResponseOrThrow(res, '保存配置失败');
 
     adminConfig = data.config;
     renderAdminPanel();
@@ -953,8 +959,7 @@ async function refreshPublicConfig() {
       'x-admin-password': password
     }
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  publicConfig = await res.json();
+  publicConfig = await readJsonResponseOrThrow(res, '加载配置失败');
 
   document.title = publicConfig.appName || 'EasyChat AI';
   const appTitle = document.getElementById('app-title');
@@ -1001,7 +1006,7 @@ async function testConnection() {
       body: JSON.stringify({ presetId: preset.id })
     });
 
-    const data = await res.json();
+    const data = await readJsonResponse(res);
 
     if (res.ok && data.ok) {
       indicator.className = 'w-3 h-3 rounded-full bg-green-500 shadow-[0_0_12px_#22c55e]';
@@ -1121,7 +1126,7 @@ async function handleSend() {
     if (!response.ok) {
       let msg = `HTTP ${response.status}`;
       try {
-        const data = await response.json();
+        const data = await readJsonResponse(response);
         msg = data.details || data.error || msg;
       } catch (_) {}
       throw new Error(msg);
