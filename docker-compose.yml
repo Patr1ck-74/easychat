@@ -9,11 +9,10 @@ services:
       - "7777:7777"
     environment:
       EASYCHAT_ADMIN_PASSWORD: change-this-password
-      LOG_PATH: /app/server/logs/easychat.log
-      SESSIONS_PATH: /app/server/sessions.json
+      DATA_DIR: /data
     restart: unless-stopped
     volumes:
-      - ./server/presets.json:/app/server/presets.json
-      - ./server/logs:/app/server/logs
-      - ./server/uploads:/app/server/uploads
-      - ./server/sessions.json:/app/server/sessions.json
+      - easychat-data:/data
+
+volumes:
+  easychat-data:

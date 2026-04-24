@@ -19,10 +19,6 @@ docker run -d \
   --name easychat \
   -p 7777:7777 \
   -e EASYCHAT_ADMIN_PASSWORD=change-this-password \
-  -e CONFIG_PATH=/data/presets.json \
-  -e LOG_PATH=/data/easychat.log \
-  -e UPLOAD_DIR=/data/uploads \
-  -e SESSIONS_PATH=/data/sessions.json \
   -e PUBLIC_BASE_URL=https://你的域名 \
   -v easychat-data:/data \
   --restart unless-stopped \
@@ -31,10 +27,8 @@ docker run -d \
 
 说明：
 
-- `CONFIG_PATH=/data/presets.json`：配置持久化到 volume
-- `LOG_PATH=/data/easychat.log`：服务端日志持久化到 volume
-- `UPLOAD_DIR=/data/uploads`：用户上传图片持久化到 volume
-- `SESSIONS_PATH=/data/sessions.json`：会话历史持久化到 volume（刷新/重建容器后可恢复）
+- Docker 镜像默认 `DATA_DIR=/data`，只要挂载 `-v easychat-data:/data`，配置、日志、上传/生成图片、会话历史都会持久化。
+- 仍兼容高级自定义路径：`CONFIG_PATH`、`LOG_PATH`、`UPLOAD_DIR`、`SESSIONS_PATH`，不设置时会自动落到 `DATA_DIR` 下。
 - `PUBLIC_BASE_URL`：用于图片识图场景生成可访问的绝对地址（建议配置）
 
 ### 2) 更新
@@ -94,5 +88,5 @@ node server.js
 ## 注意
 
 - `server/presets.json` 不要提交到仓库
-- 对话历史会同时保存在浏览器本地与服务端 `SESSIONS_PATH`（默认 `server/sessions.json`）
+- 对话历史会同时保存在浏览器本地与服务端 `DATA_DIR/sessions.json`（Docker 默认 `/data/sessions.json`）
 - 容器重建不会影响 `/data/presets.json`、`/data/easychat.log`、`/data/uploads`、`/data/sessions.json`

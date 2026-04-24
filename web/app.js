@@ -1202,6 +1202,9 @@ async function handleImageGenerate() {
   session.history.push({ role: 'user', content: userContent });
 
   const aiBubble = renderBubble('assistant', '正在生成图片，请稍候...');
+  const assistantMessage = { role: 'assistant', content: '正在生成图片，请稍候...' };
+  session.history.push(assistantMessage);
+  saveSessions();
 
   try {
     const response = await fetch('/api/image-generate', {
@@ -1227,11 +1230,14 @@ async function handleImageGenerate() {
     }
 
     setStatus(`图片任务已提交，正在后台生成（任务：${taskData.taskId}）`, 'info');
-    renderBubbleContent(aiBubble, `图片任务已提交，正在后台生成...\n\n任务 ID：${taskData.taskId}`);
+    assistantMessage.content = `图片任务已提交，正在后台生成...\n\n任务 ID：${taskData.taskId}`;
+    renderBubbleContent(aiBubble, assistantMessage.content);
+    saveSessions();
 
     const data = await pollImageTask(taskData.taskId, password, (task, elapsed) => {
       const statusText = task.status === 'queued' ? '排队中' : task.status === 'running' ? '生成中' : task.status;
       const message = `图片${statusText}，已等待 ${formatElapsed(elapsed)}...\n\n任务 ID：${taskData.taskId}`;
+      assistantMessage.content = message;
       renderBubbleContent(aiBubble, message);
       setStatus(`图片${statusText}，已等待 ${formatElapsed(elapsed)}`, 'info');
     });
@@ -1258,11 +1264,14 @@ async function handleImageGenerate() {
     ];
 
     renderBubbleContent(aiBubble, assistantContent);
-    session.history.push({ role: 'assistant', content: assistantContent });
+    assistantMessage.content = assistantContent;
     saveSessions();
     setStatus('图片生成成功', 'success');
   } catch (error) {
-    aiBubble.innerHTML = `<span class="text-red-500">出图失败：${error.message}</span>`;
+    const errorContent = `出图失败：${error.message}`;
+    assistantMessage.content = errorContent;
+    aiBubble.innerHTML = `<span class="text-red-500">${errorContent}</span>`;
+    saveSessions();
     setStatus(`出图失败：${error.message}`, 'error');
   } finally {
     imageGenerating = false;

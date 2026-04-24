@@ -13,12 +13,13 @@ const app = express();
 const PORT = Number(process.env.PORT || 7777);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_ROOT = path.resolve(__dirname, '../web');
-const CONFIG_PATH = process.env.CONFIG_PATH || path.join(__dirname, 'presets.json');
+const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? '/data' : __dirname);
+const CONFIG_PATH = process.env.CONFIG_PATH || path.join(DATA_DIR, 'presets.json');
 const EXAMPLE_CONFIG_PATH = path.join(__dirname, 'presets.example.json');
 const ADMIN_PASSWORD = process.env.EASYCHAT_ADMIN_PASSWORD || '';
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
-const LOG_PATH = process.env.LOG_PATH || '';
-const SESSIONS_PATH = process.env.SESSIONS_PATH || path.join(__dirname, 'sessions.json');
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(DATA_DIR, 'uploads');
+const LOG_PATH = process.env.LOG_PATH || path.join(DATA_DIR, 'easychat.log');
+const SESSIONS_PATH = process.env.SESSIONS_PATH || path.join(DATA_DIR, 'sessions.json');
 const IMAGE_TASK_TTL_MS = Number(process.env.IMAGE_TASK_TTL_MS || 60 * 60 * 1000);
 const IMAGE_TASK_CLEANUP_MS = Number(process.env.IMAGE_TASK_CLEANUP_MS || 5 * 60 * 1000);
 
