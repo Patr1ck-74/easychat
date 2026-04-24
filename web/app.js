@@ -151,7 +151,7 @@ async function refreshStoredImageTasks(session) {
   }
 
   if (changed) {
-    syncSessionsToLocalStorage();
+    safeSyncSessionsToLocalStorage();
     await pushSessionsToServer();
     if (session.id === currentSessionId) loadSession(session.id, { skipTaskRefresh: true });
   }
@@ -193,6 +193,32 @@ async function pushSessionsToServer() {
   }
 }
 
+function safeSyncSessionsToLocalStorage() {
+  try {
+    syncSessionsToLocalStorage();
+    return true;
+  } catch (error) {
+    if (!isQuotaExceededError(error)) {
+      console.error('保存会话到本地失败', error);
+      return false;
+    }
+
+    const shrunk = shrinkSessionsForStorage();
+    if (!shrunk) {
+      console.warn('本地会话空间不足，已跳过本地保存；服务端会话仍会同步');
+      return false;
+    }
+
+    try {
+      syncSessionsToLocalStorage();
+      return true;
+    } catch (retryError) {
+      console.warn('压缩后仍无法保存到本地；服务端会话仍会同步', retryError);
+      return false;
+    }
+  }
+}
+
 function scheduleSessionsSync(immediate = false) {
   if (sessionsSyncTimer) {
     clearTimeout(sessionsSyncTimer);
@@ -225,7 +251,7 @@ async function loadSessionsFromServer() {
     if (remoteSessions.length > 0) {
       sessions = remoteSessions;
       currentSessionId = remoteSessions.some((s) => s.id === remoteCurrentId) ? remoteCurrentId : remoteSessions[0].id;
-      syncSessionsToLocalStorage();
+      safeSyncSessionsToLocalStorage();
       return;
     }
 
@@ -308,6 +334,12 @@ function trimMessageForStorage(message, maxTextLen = 6000) {
       if (part.type === 'text' && typeof part.text === 'string' && part.text.length > maxTextLen) {
         return { ...part, text: `${part.text.slice(0, maxTextLen)}\n\n[内容过长，已截断以节省本地存储]` };
       }
+      if (part.type === 'image_url') {
+        const rawUrl = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+        if (typeof rawUrl === 'string' && rawUrl.startsWith('data:image/') && rawUrl.length > 2000) {
+          return { type: 'text', text: '[图片数据过大，已省略本地存储副本]' };
+        }
+      }
       return part;
     });
   } else if (typeof cloned.content === 'string' && cloned.content.length > maxTextLen) {
@@ -351,22 +383,23 @@ function saveSessions() {
     try {
       syncSessionsToLocalStorage();
       scheduleSessionsSync();
-      return;
+      return true;
     } catch (error) {
       if (!isQuotaExceededError(error)) {
         console.error('保存会话失败', error);
-        return;
+        return false;
       }
 
       const shrunk = shrinkSessionsForStorage();
       if (!shrunk) {
         console.error('本地存储空间不足，且无法继续压缩会话数据');
-        return;
+        return false;
       }
     }
   }
 
   console.error('本地存储空间不足，保存会话未完全成功');
+  return false;
 }
 
 function sanitizeHtml(html) {
@@ -728,7 +761,7 @@ function createNewChat() {
 
 function loadSession(id, options = {}) {
   currentSessionId = id;
-  syncSessionsToLocalStorage();
+  safeSyncSessionsToLocalStorage();
 
   const session = getCurrentSession();
   const container = document.querySelector('#chat-box > div');
@@ -1348,7 +1381,7 @@ async function handleImageGenerate() {
 
     renderBubbleContent(aiBubble, assistantContent);
     assistantMessage.content = assistantContent;
-    syncSessionsToLocalStorage();
+    safeSyncSessionsToLocalStorage();
     await pushSessionsToServer();
     setStatus('图片生成成功', 'success');
   } catch (error) {
