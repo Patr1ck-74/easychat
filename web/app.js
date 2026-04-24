@@ -13,8 +13,8 @@ let sessionsSyncInFlight = false;
 const IMAGE_MAX_WIDTH = 1280;
 const IMAGE_MAX_HEIGHT = 1280;
 const IMAGE_QUALITY = 0.82;
-const IMAGE_GENERATE_PRIMARY_SIZE = '3840x2160';
-const IMAGE_GENERATE_FALLBACK_SIZES = ['2560x1440', '1920x1080', '1792x1024', '1024x1024'];
+const IMAGE_GENERATE_PRIMARY_SIZE = '1024x1024';
+const IMAGE_GENERATE_FALLBACK_SIZES = ['1024x1024'];
 
 function readLocalSessions() {
   try {
@@ -1172,7 +1172,7 @@ async function handleImageGenerate() {
     const assistantContent = [
       {
         type: 'text',
-        text: `已为你生成图片。\n\n请求分辨率：${requestedSizeText}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}\n实际分辨率：${actualSizeText}${sizeMismatch ? '\n⚠️ 上游返回的实际分辨率与请求分辨率不一致。' : ''}\n\n提示词：${data.prompt || prompt}${data.revisedPrompt ? `\n\n优化后提示词：${data.revisedPrompt}` : ''}`
+        text: `已为你生成图片。\n\n调用模型：${data.model || preset.imageModel || preset.model}${data.upstreamModel && data.upstreamModel !== data.model ? `（上游返回：${data.upstreamModel}）` : ''}\n请求分辨率：${requestedSizeText}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}\n实际分辨率：${actualSizeText}${sizeMismatch ? '\n⚠️ 上游返回的实际分辨率与请求分辨率不一致。' : ''}\n\n提示词：${data.prompt || prompt}${data.revisedPrompt ? `\n\n优化后提示词：${data.revisedPrompt}` : ''}`
       },
       { type: 'image_url', image_url: { url: safeImageUrl } }
     ];

@@ -641,6 +641,16 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
     let lastStatus = 500;
     let lastDetails = null;
 
+    writeLog('INFO', '图片生成请求', {
+      presetId: preset.id,
+      presetName: preset.name,
+      chatModel: preset.model,
+      imageModel: preset.imageModel || '',
+      model,
+      requestedSize: requestedSize || 'default',
+      fallbackSizes: fallbackList
+    });
+
     for (let index = 0; index < Math.max(sizeAttempts.length, 1); index += 1) {
       const trySize = sizeAttempts[index] || '';
 
@@ -710,6 +720,7 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
       }
 
       const first = data?.data?.[0] || {};
+      const upstreamModel = String(data?.model || first?.model || '').trim();
       let imageUrl = first.url || toDataUrlFromBase64(first.b64_json);
 
       if (!imageUrl) {
@@ -759,6 +770,7 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
       return res.json({
         ok: true,
         model,
+        upstreamModel,
         prompt: cleanPrompt,
         url: imageUrl,
         revisedPrompt: first.revised_prompt || '',
