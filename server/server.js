@@ -19,6 +19,10 @@ const ADMIN_PASSWORD = process.env.EASYCHAT_ADMIN_PASSWORD || '';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 const LOG_PATH = process.env.LOG_PATH || '';
 const SESSIONS_PATH = process.env.SESSIONS_PATH || path.join(__dirname, 'sessions.json');
+const IMAGE_TASK_TTL_MS = Number(process.env.IMAGE_TASK_TTL_MS || 60 * 60 * 1000);
+const IMAGE_TASK_CLEANUP_MS = Number(process.env.IMAGE_TASK_CLEANUP_MS || 5 * 60 * 1000);
+
+const imageTasks = new Map();
 
 app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
@@ -359,6 +363,51 @@ function getPublicBaseUrl(req) {
   return normalizeBaseUrl(`${proto}://${host}`);
 }
 
+function createImageTask() {
+  const id = `img-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const now = Date.now();
+  const task = {
+    id,
+    status: 'queued',
+    createdAt: now,
+    updatedAt: now,
+    startedAt: null,
+    finishedAt: null,
+    result: null,
+    error: null,
+    details: null
+  };
+  imageTasks.set(id, task);
+  return task;
+}
+
+function serializeImageTask(task) {
+  if (!task) return null;
+  return {
+    ok: task.status === 'succeeded',
+    taskId: task.id,
+    status: task.status,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    startedAt: task.startedAt,
+    finishedAt: task.finishedAt,
+    result: task.result,
+    error: task.error,
+    details: task.details
+  };
+}
+
+function cleanupImageTasks() {
+  const now = Date.now();
+  for (const [id, task] of imageTasks.entries()) {
+    if (now - (task.finishedAt || task.updatedAt || task.createdAt) > IMAGE_TASK_TTL_MS) {
+      imageTasks.delete(id);
+    }
+  }
+}
+
+setInterval(cleanupImageTasks, IMAGE_TASK_CLEANUP_MS).unref?.();
+
 function toAbsoluteImageUrl(imageUrl, req) {
   const value = String(imageUrl || '').trim();
   if (!value) return value;
@@ -643,24 +692,29 @@ app.post('/api/chat', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/image-generate', requireAdmin, async (req, res) => {
-  try {
-    const { presetId, prompt, size, quality, n, fallbackSizes } = req.body || {};
+async function generateImageResult(input, publicBaseUrl) {
+    const { presetId, prompt, size, quality, n, fallbackSizes } = input || {};
     const cleanPrompt = String(prompt || '').trim();
 
     if (!cleanPrompt) {
-      return res.status(400).json({ error: 'prompt 不能为空' });
+      const error = new Error('prompt 不能为空');
+      error.status = 400;
+      throw error;
     }
 
     const preset = findPresetById(presetId);
     if (!preset) {
-      return res.status(400).json({ error: '无效的 presetId' });
+      const error = new Error('无效的 presetId');
+      error.status = 400;
+      throw error;
     }
 
     const url = `${normalizeBaseUrl(preset.baseUrl)}/images/generations`;
     const model = String(preset.imageModel || preset.model || '').trim();
     if (!model) {
-      return res.status(400).json({ error: '当前预设缺少可用模型（model/imageModel）' });
+      const error = new Error('当前预设缺少可用模型（model/imageModel）');
+      error.status = 400;
+      throw error;
     }
 
     const requestedSize = normalizeImageSize(size);
@@ -753,10 +807,10 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
           continue;
         }
 
-        return res.status(upstream.status).json({
-          error: '上游图片接口返回错误',
-          details: data || text
-        });
+        const error = new Error('上游图片接口返回错误');
+        error.status = upstream.status;
+        error.details = data || text;
+        throw error;
       }
 
       const first = findFirstImageResult(data);
@@ -785,16 +839,16 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
           continue;
         }
 
-        return res.status(502).json({
-          error: '上游未返回有效图片数据',
-          details: data || text
-        });
+        const error = new Error('上游未返回有效图片数据');
+        error.status = 502;
+        error.details = data || text;
+        throw error;
       }
 
       if (firstUrl && /^https?:\/\//i.test(firstUrl)) {
         try {
           const savedFilename = await persistRemoteImage(firstUrl);
-          imageUrl = `${getPublicBaseUrl(req)}/uploads/${savedFilename}`;
+          imageUrl = `${publicBaseUrl}/uploads/${savedFilename}`;
         } catch (persistError) {
           writeLog('INFO', '图片持久化失败，回退使用上游直链', {
             message: persistError.message
@@ -806,7 +860,7 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
           const buffer = Buffer.from(firstB64, 'base64');
           if (buffer.length) {
             const savedFilename = saveImageBuffer(buffer, ext);
-            imageUrl = `${getPublicBaseUrl(req)}/uploads/${savedFilename}`;
+            imageUrl = `${publicBaseUrl}/uploads/${savedFilename}`;
           }
         } catch (persistError) {
           writeLog('INFO', 'base64 图片持久化失败，回退 data url', {
@@ -815,7 +869,7 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
         }
       }
 
-      return res.json({
+      return {
         ok: true,
         model,
         upstreamModel,
@@ -824,19 +878,72 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
         revisedPrompt: first.revised_prompt || '',
         sizeUsed: trySize || '',
         fallbackApplied: index > 0
-      });
+      };
     }
 
-    return res.status(lastStatus || 500).json({
-      error: '生成图片失败',
-      details: lastDetails || '未知错误'
+    const error = new Error('生成图片失败');
+    error.status = lastStatus || 500;
+    error.details = lastDetails || '未知错误';
+    throw error;
+}
+
+async function runImageTask(task, input, publicBaseUrl) {
+  task.status = 'running';
+  task.startedAt = Date.now();
+  task.updatedAt = task.startedAt;
+
+  try {
+    task.result = await generateImageResult(input, publicBaseUrl);
+    task.status = 'succeeded';
+    task.finishedAt = Date.now();
+    task.updatedAt = task.finishedAt;
+    writeLog('INFO', '图片异步任务完成', { taskId: task.id, model: task.result?.model, sizeUsed: task.result?.sizeUsed || 'default' });
+  } catch (error) {
+    task.status = 'failed';
+    task.error = error.message || '生成图片失败';
+    task.details = error.details || null;
+    task.finishedAt = Date.now();
+    task.updatedAt = task.finishedAt;
+    writeLog('ERROR', '图片异步任务失败', { taskId: task.id, message: task.error, details: stringifyErrorDetails(task.details).slice(0, 1000) });
+  }
+}
+
+app.post('/api/image-generate', requireAdmin, (req, res) => {
+  try {
+    const { prompt, presetId } = req.body || {};
+    if (!String(prompt || '').trim()) {
+      return res.status(400).json({ error: 'prompt 不能为空' });
+    }
+    if (!findPresetById(presetId)) {
+      return res.status(400).json({ error: '无效的 presetId' });
+    }
+
+    const task = createImageTask();
+    const publicBaseUrl = getPublicBaseUrl(req);
+
+    setImmediate(() => {
+      runImageTask(task, req.body || {}, publicBaseUrl);
+    });
+
+    return res.status(202).json({
+      ok: true,
+      async: true,
+      taskId: task.id,
+      status: task.status,
+      pollUrl: `/api/image-generate/${task.id}`
     });
   } catch (error) {
-    writeLog('ERROR', '图片生成失败', { message: error.message });
-    return res.status(500).json({
-      error: error.message || '生成图片失败'
-    });
+    writeLog('ERROR', '创建图片异步任务失败', { message: error.message });
+    return res.status(500).json({ error: error.message || '创建图片任务失败' });
   }
+});
+
+app.get('/api/image-generate/:taskId', requireAdmin, (req, res) => {
+  const task = imageTasks.get(String(req.params.taskId || ''));
+  if (!task) {
+    return res.status(404).json({ ok: false, error: '图片任务不存在或已过期' });
+  }
+  return res.json(serializeImageTask(task));
 });
 
 app.use('/uploads', express.static(UPLOAD_DIR));

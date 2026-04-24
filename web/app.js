@@ -15,6 +15,61 @@ const IMAGE_MAX_HEIGHT = 1280;
 const IMAGE_QUALITY = 0.82;
 const IMAGE_GENERATE_PRIMARY_SIZE = '3840x2160';
 const IMAGE_GENERATE_FALLBACK_SIZES = ['2560x1440', '1920x1080', '1792x1024', '1024x1024'];
+const IMAGE_TASK_POLL_INTERVAL_MS = 3000;
+const IMAGE_TASK_MAX_WAIT_MS = 30 * 60 * 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch (_) {
+    throw new Error(text ? `服务端返回了非 JSON 内容：${text.slice(0, 120)}` : '服务端返回空内容');
+  }
+}
+
+function formatElapsed(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}分${String(s).padStart(2, '0')}秒` : `${s}秒`;
+}
+
+async function pollImageTask(taskId, password, onProgress) {
+  const started = Date.now();
+  while (Date.now() - started < IMAGE_TASK_MAX_WAIT_MS) {
+    await sleep(IMAGE_TASK_POLL_INTERVAL_MS);
+
+    const response = await fetch(`/api/image-generate/${encodeURIComponent(taskId)}`, {
+      headers: {
+        'x-admin-password': password
+      }
+    });
+    const data = await readJsonResponse(response);
+
+    if (!response.ok) {
+      throw new Error(data?.error || `HTTP ${response.status}`);
+    }
+
+    onProgress?.(data, Date.now() - started);
+
+    if (data.status === 'succeeded' && data.result?.url) {
+      return data.result;
+    }
+
+    if (data.status === 'failed') {
+      const detailMessage = typeof data?.details === 'string'
+        ? data.details
+        : data?.details?.error?.message || data?.details?.message || JSON.stringify(data?.details || '');
+      throw new Error(detailMessage || data.error || '图片生成失败');
+    }
+  }
+
+  throw new Error(`图片生成等待超时（${formatElapsed(IMAGE_TASK_MAX_WAIT_MS)}）`);
+}
 
 function readLocalSessions() {
   try {
@@ -1158,12 +1213,29 @@ async function handleImageGenerate() {
       })
     });
 
-    const data = await response.json();
-    if (!response.ok || !data?.ok || !data?.url) {
+    const taskData = await readJsonResponse(response);
+    if (!response.ok || !taskData?.ok || !taskData?.taskId) {
+      const detailMessage = typeof taskData?.details === 'string'
+        ? taskData.details
+        : taskData?.details?.error?.message || taskData?.details?.message || JSON.stringify(taskData?.details || '');
+      throw new Error(detailMessage || taskData?.error || `HTTP ${response.status}`);
+    }
+
+    setStatus(`图片任务已提交，正在后台生成（任务：${taskData.taskId}）`, 'info');
+    renderBubbleContent(aiBubble, `图片任务已提交，正在后台生成...\n\n任务 ID：${taskData.taskId}`);
+
+    const data = await pollImageTask(taskData.taskId, password, (task, elapsed) => {
+      const statusText = task.status === 'queued' ? '排队中' : task.status === 'running' ? '生成中' : task.status;
+      const message = `图片${statusText}，已等待 ${formatElapsed(elapsed)}...\n\n任务 ID：${taskData.taskId}`;
+      renderBubbleContent(aiBubble, message);
+      setStatus(`图片${statusText}，已等待 ${formatElapsed(elapsed)}`, 'info');
+    });
+
+    if (!data?.url) {
       const detailMessage = typeof data?.details === 'string'
         ? data.details
         : data?.details?.error?.message || data?.details?.message || JSON.stringify(data?.details || '');
-      throw new Error(detailMessage || data?.error || `HTTP ${response.status}`);
+      throw new Error(detailMessage || data?.error || '上游未返回图片地址');
     }
 
     const safeImageUrl = sanitizeImageUrl(data.url) || data.url;
