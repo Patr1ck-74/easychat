@@ -998,6 +998,9 @@ app.post('/api/image-generate', requireAdmin, (req, res) => {
 });
 
 app.get('/api/image-generate/:taskId', requireAdmin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   const task = imageTasks.get(String(req.params.taskId || ''));
   if (!task) {
     return res.status(404).json({ ok: false, error: '图片任务不存在或已过期' });

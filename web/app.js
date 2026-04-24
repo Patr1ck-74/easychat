@@ -57,7 +57,9 @@ async function pollImageTask(taskId, password, onProgress) {
     await sleep(IMAGE_TASK_POLL_INTERVAL_MS);
 
     const response = await fetch(`/api/image-generate/${encodeURIComponent(taskId)}`, {
+      cache: 'no-store',
       headers: {
+        'Cache-Control': 'no-cache',
         'x-admin-password': password
       }
     });
@@ -88,6 +90,71 @@ async function pollImageTask(taskId, password, onProgress) {
   }
 
   throw new Error(`图片生成等待超时（${formatElapsed(IMAGE_TASK_MAX_WAIT_MS)}）`);
+}
+
+function extractImageTaskId(content) {
+  if (typeof content !== 'string') return '';
+  return content.match(/任务\s*ID[：:]\s*(img-[\w-]+)/i)?.[1] || '';
+}
+
+function isUnfinishedImageTaskMessage(content) {
+  if (typeof content !== 'string') return false;
+  return Boolean(extractImageTaskId(content)) &&
+    !content.includes('已为你生成图片') &&
+    !content.includes('图片生成已取消') &&
+    !content.startsWith('出图失败');
+}
+
+function buildImageAssistantContent(data) {
+  const safeImageUrl = sanitizeImageUrl(data.url) || data.url;
+  return [
+    {
+      type: 'text',
+      text: `已为你生成图片。\n\n调用模型：${data.model || data.upstreamModel || '未知'}${data.upstreamModel && data.upstreamModel !== data.model ? `（上游返回：${data.upstreamModel}）` : ''}\n请求分辨率：${data.sizeUsed || '未知'}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}\n\n提示词：${data.prompt || ''}${data.revisedPrompt ? `\n\n优化后提示词：${data.revisedPrompt}` : ''}`
+    },
+    { type: 'image_url', image_url: { url: safeImageUrl } }
+  ];
+}
+
+async function refreshStoredImageTasks(session) {
+  const password = getAdminPassword();
+  if (!password || !session?.history?.length) return;
+
+  let changed = false;
+  for (const msg of session.history) {
+    if (msg.role !== 'assistant' || !isUnfinishedImageTaskMessage(msg.content)) continue;
+    const taskId = extractImageTaskId(msg.content);
+    try {
+      const response = await fetch(`/api/image-generate/${encodeURIComponent(taskId)}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'x-admin-password': password
+        }
+      });
+      if (!response.ok) continue;
+      const task = await readJsonResponse(response);
+
+      if (task.status === 'succeeded' && task.result?.url) {
+        msg.content = buildImageAssistantContent(task.result);
+        changed = true;
+      } else if (task.status === 'failed') {
+        msg.content = `出图失败：${task.error || '图片生成失败'}`;
+        changed = true;
+      } else if (task.status === 'cancelled') {
+        msg.content = '图片生成已取消';
+        changed = true;
+      }
+    } catch (error) {
+      console.warn('刷新历史图片任务失败', taskId, error);
+    }
+  }
+
+  if (changed) {
+    syncSessionsToLocalStorage();
+    await pushSessionsToServer();
+    if (session.id === currentSessionId) loadSession(session.id, { skipTaskRefresh: true });
+  }
 }
 
 function readLocalSessions() {
@@ -659,9 +726,9 @@ function createNewChat() {
   if (window.innerWidth < 1024) toggleSidebar();
 }
 
-function loadSession(id) {
+function loadSession(id, options = {}) {
   currentSessionId = id;
-  saveSessions();
+  syncSessionsToLocalStorage();
 
   const session = getCurrentSession();
   const container = document.querySelector('#chat-box > div');
@@ -679,6 +746,10 @@ function loadSession(id) {
   }
 
   renderHistoryList();
+
+  if (!options.skipTaskRefresh) {
+    refreshStoredImageTasks(session);
+  }
 }
 
 function renderHistoryList() {
@@ -1265,17 +1336,20 @@ async function handleImageGenerate() {
     const actualSizeText = actualDimensions ? `${actualDimensions.width}x${actualDimensions.height}` : '未知';
     const sizeMismatch = actualDimensions && requestedSizeText && requestedSizeText !== actualSizeText;
 
-    const assistantContent = [
-      {
-        type: 'text',
-        text: `已为你生成图片。\n\n调用模型：${data.model || preset.imageModel || preset.model}${data.upstreamModel && data.upstreamModel !== data.model ? `（上游返回：${data.upstreamModel}）` : ''}\n请求分辨率：${requestedSizeText}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}\n实际分辨率：${actualSizeText}${sizeMismatch ? '\n⚠️ 上游返回的实际分辨率与请求分辨率不一致。' : ''}\n\n提示词：${data.prompt || prompt}${data.revisedPrompt ? `\n\n优化后提示词：${data.revisedPrompt}` : ''}`
-      },
-      { type: 'image_url', image_url: { url: safeImageUrl } }
-    ];
+    const assistantContent = buildImageAssistantContent({
+      ...data,
+      model: data.model || preset.imageModel || preset.model,
+      url: safeImageUrl
+    });
+    assistantContent[0].text = assistantContent[0].text.replace(
+      `请求分辨率：${requestedSizeText}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}`,
+      `请求分辨率：${requestedSizeText}${data.fallbackApplied ? '（已自动降级到兼容尺寸）' : ''}\n实际分辨率：${actualSizeText}${sizeMismatch ? '\n⚠️ 上游返回的实际分辨率与请求分辨率不一致。' : ''}`
+    );
 
     renderBubbleContent(aiBubble, assistantContent);
     assistantMessage.content = assistantContent;
-    saveSessions();
+    syncSessionsToLocalStorage();
+    await pushSessionsToServer();
     setStatus('图片生成成功', 'success');
   } catch (error) {
     const errorContent = `出图失败：${error.message}`;
