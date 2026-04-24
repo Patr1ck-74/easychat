@@ -236,6 +236,62 @@ function markdownToHtml(content) {
   return sanitizeHtml(marked.parse(content || ''));
 }
 
+async function copyTextToClipboard(text, successMessage = '已复制到剪贴板') {
+  const value = String(text || '');
+  if (!value) {
+    setStatus('没有可复制内容', 'info');
+    return false;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    setStatus(successMessage, 'success');
+    return true;
+  } catch (error) {
+    setStatus(`复制失败：${error.message}`, 'error');
+    return false;
+  }
+}
+
+function enhanceCodeBlocks(root) {
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.dataset.copyEnhanced === 'true') return;
+    pre.dataset.copyEnhanced = 'true';
+    pre.classList.add('relative', 'group');
+
+    const code = pre.querySelector('code');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'absolute top-2 right-2 z-10 px-2 py-1 rounded-lg bg-slate-900/80 text-slate-100 text-[10px] font-semibold opacity-80 hover:opacity-100 transition shadow border border-white/10';
+    button.textContent = '复制代码';
+    button.onclick = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const ok = await copyTextToClipboard(code?.innerText || pre.innerText, '代码已复制');
+      if (ok) {
+        button.textContent = '已复制';
+        setTimeout(() => {
+          button.textContent = '复制代码';
+        }, 1200);
+      }
+    };
+
+    pre.appendChild(button);
+  });
+}
+
 function sanitizeImageUrl(url) {
   const value = String(url || '').trim();
   if (!value) return '';
@@ -357,6 +413,9 @@ function renderBubbleContent(bubble, content) {
     actions.appendChild(downloadBtn);
     bubble.appendChild(actions);
   });
+
+  bubble.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
+  enhanceCodeBlocks(bubble);
 }
 
 function updateImagePreview() {
@@ -602,17 +661,7 @@ function stringifyMessageForCopy(content) {
 }
 
 async function copyMessage(content) {
-  try {
-    const text = stringifyMessageForCopy(content);
-    if (!text) {
-      setStatus('没有可复制内容', 'info');
-      return;
-    }
-    await navigator.clipboard.writeText(text);
-    setStatus('已复制到剪贴板', 'success');
-  } catch (error) {
-    setStatus(`复制失败：${error.message}`, 'error');
-  }
+  await copyTextToClipboard(stringifyMessageForCopy(content));
 }
 
 function renderBubble(role, content) {
@@ -645,7 +694,6 @@ function renderBubble(role, content) {
   div.appendChild(bubble);
   container.appendChild(div);
 
-  bubble.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
   document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
 
   return bubble;
@@ -1047,6 +1095,7 @@ async function handleSend() {
   } finally {
     aiBubble.classList.remove('typing');
     aiBubble.querySelectorAll('pre code').forEach((el) => hljs.highlightElement(el));
+    enhanceCodeBlocks(aiBubble);
     document.getElementById('loading-tag').classList.add('hidden');
     document.getElementById('stop-btn').classList.add('hidden');
     abortController = null;

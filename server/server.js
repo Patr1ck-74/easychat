@@ -75,6 +75,28 @@ function normalizeBaseUrl(baseUrl) {
 
 const DEFAULT_IMAGE_FALLBACK_SIZES = ['2560x1440', '1920x1080', '1024x1024'];
 
+function stringifyErrorDetails(details) {
+  if (typeof details === 'string') return details;
+  try {
+    return JSON.stringify(details || '');
+  } catch (_) {
+    return String(details || '');
+  }
+}
+
+function isUnsupportedImagePayloadError(status, details) {
+  const text = stringifyErrorDetails(details).toLowerCase();
+  return [400, 404, 422].includes(Number(status)) && (
+    text.includes('response_format') ||
+    text.includes('unsupported parameter') ||
+    text.includes('unknown parameter') ||
+    text.includes('invalid parameter') ||
+    text.includes('invalid_request_error') ||
+    text.includes('not supported') ||
+    text.includes('unsupported value')
+  );
+}
+
 function normalizeImageSize(size) {
   const value = String(size || '').trim();
   if (!value) return '';
@@ -621,30 +643,51 @@ app.post('/api/image-generate', requireAdmin, async (req, res) => {
 
     for (let index = 0; index < Math.max(sizeAttempts.length, 1); index += 1) {
       const trySize = sizeAttempts[index] || '';
-      const payload = {
-        model,
-        prompt: cleanPrompt,
-        response_format: 'url'
-      };
 
-      if (trySize) payload.size = trySize;
-      if (quality) payload.quality = String(quality);
-      if (Number.isInteger(n) && n > 0 && n <= 4) payload.n = n;
-
-      const upstream = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${preset.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const text = await upstream.text();
+      let upstream = null;
+      let text = '';
       let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch (_) {}
+      const payloadVariants = [true, false];
+
+      for (const includeResponseFormat of payloadVariants) {
+        const payload = {
+          model,
+          prompt: cleanPrompt
+        };
+
+        // 不同 OpenAI 兼容网关对 response_format 支持不一致：
+        // 官方 DALL·E 需要/支持 url，部分中转或 Gemini 兼容层会直接报 unsupported parameter。
+        if (includeResponseFormat) payload.response_format = 'url';
+        if (trySize) payload.size = trySize;
+        if (quality) payload.quality = String(quality);
+        if (Number.isInteger(n) && n > 0 && n <= 4) payload.n = n;
+
+        upstream = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${preset.apiKey}`,
+            'x-api-key': preset.apiKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        text = await upstream.text();
+        data = null;
+        try {
+          data = JSON.parse(text);
+        } catch (_) {}
+
+        if (upstream.ok || !includeResponseFormat || !isUnsupportedImagePayloadError(upstream.status, data || text)) {
+          break;
+        }
+
+        writeLog('INFO', '图片生成移除 response_format 后重试', {
+          model,
+          size: trySize || 'default',
+          status: upstream.status
+        });
+      }
 
       if (!upstream.ok) {
         lastStatus = upstream.status;
