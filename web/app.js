@@ -833,7 +833,7 @@ function loadSession(id, options = {}) {
       </div>
     `;
   } else {
-    session.history.forEach((msg) => renderBubble(msg.role, msg.content));
+    session.history.forEach((msg, index) => renderBubble(msg.role, msg.content, { messageIndex: index }));
   }
 
   renderHistoryList();
@@ -908,7 +908,18 @@ async function copyMessage(content) {
   await copyTextToClipboard(stringifyMessageForCopy(content));
 }
 
-function renderBubble(role, content) {
+function deleteMessage(messageIndex) {
+  const session = getCurrentSession();
+  if (!session || !Array.isArray(session.history)) return;
+  if (!Number.isInteger(messageIndex) || messageIndex < 0 || messageIndex >= session.history.length) return;
+
+  session.history.splice(messageIndex, 1);
+  saveSessions();
+  loadSession(session.id, { skipTaskRefresh: true });
+  setStatus('消息已删除', 'success');
+}
+
+function renderBubble(role, content, options = {}) {
   document.getElementById('welcome-view')?.remove();
 
   const container = document.querySelector('#chat-box > div');
@@ -938,6 +949,16 @@ function renderBubble(role, content) {
   copyBtn.onclick = () => copyMessage(bubble.__content);
 
   meta.appendChild(copyBtn);
+
+  if (Number.isInteger(options.messageIndex)) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'text-[10px] text-slate-400 hover:text-red-500 transition';
+    deleteBtn.textContent = '删除';
+    deleteBtn.onclick = () => deleteMessage(options.messageIndex);
+    meta.appendChild(deleteBtn);
+  }
+
   div.appendChild(meta);
   div.appendChild(bubble);
   container.appendChild(div);
@@ -1281,10 +1302,15 @@ async function handleSend() {
     renderHistoryList();
   }
 
-  renderBubble('user', userContent);
+  const userIndex = session.history.length;
   session.history.push({ role: 'user', content: userContent });
+  renderBubble('user', userContent, { messageIndex: userIndex });
 
-  const aiBubble = renderBubble('assistant', '');
+  const assistantMessage = { role: 'assistant', content: '' };
+  const assistantIndex = session.history.length;
+  session.history.push(assistantMessage);
+
+  const aiBubble = renderBubble('assistant', '', { messageIndex: assistantIndex });
   aiBubble.classList.add('typing');
 
   let full = '';
@@ -1315,23 +1341,28 @@ async function handleSend() {
 
     await readSSEStream(response, (delta) => {
       full += delta;
+      assistantMessage.content = full;
       renderBubbleContent(aiBubble, full);
       document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
     });
 
-    session.history.push({ role: 'assistant', content: full });
+    assistantMessage.content = full;
     saveSessions();
   } catch (error) {
     if (error.name === 'AbortError') {
       if (full) {
-        session.history.push({ role: 'assistant', content: full });
+        assistantMessage.content = full;
         saveSessions();
       } else {
+        session.history.splice(assistantIndex, 1);
         aiBubble.innerHTML = '<span class="text-slate-400">已停止生成</span>';
+        saveSessions();
       }
     } else {
+      assistantMessage.content = `错误：${error.message}`;
       setErrorBubble(aiBubble, '错误：', error.message);
       setStatus(`聊天失败：${error.message}`, 'error');
+      saveSessions();
     }
   } finally {
     aiBubble.classList.remove('typing');
@@ -1380,12 +1411,14 @@ async function handleImageGenerate() {
     renderHistoryList();
   }
 
-  renderBubble('user', userContent);
+  const userIndex = session.history.length;
   session.history.push({ role: 'user', content: userContent });
+  renderBubble('user', userContent, { messageIndex: userIndex });
 
-  const aiBubble = renderBubble('assistant', '正在生成图片，请稍候...');
   const assistantMessage = { role: 'assistant', content: '正在生成图片，请稍候...' };
+  const assistantIndex = session.history.length;
   session.history.push(assistantMessage);
+  const aiBubble = renderBubble('assistant', '正在生成图片，请稍候...', { messageIndex: assistantIndex });
   saveSessions();
 
   try {
@@ -1553,6 +1586,7 @@ window.addAdminPreset = addAdminPreset;
 window.deleteAdminPreset = deleteAdminPreset;
 window.setDefaultPreset = setDefaultPreset;
 window.clearImageUrl = clearImageUrl;
+window.deleteMessage = deleteMessage;
 
 window.onload = init;
 
