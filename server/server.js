@@ -725,34 +725,82 @@ function toAbsoluteImageUrl(imageUrl, req) {
   return value;
 }
 
-function normalizeUpstreamMessages(messages, req) {
+function getImageUrlFromPart(part) {
+  if (!part || part.type !== 'image_url') return '';
+  if (typeof part.image_url === 'string') return part.image_url;
+  if (part.image_url && typeof part.image_url === 'object') return part.image_url.url || '';
+  return '';
+}
+
+function normalizeImagePartForChat(part, req, options = {}) {
+  const url = toAbsoluteImageUrl(getImageUrlFromPart(part), req);
+  if (!url) return null;
+
+  if (options.imageUrlAsString) {
+    return {
+      type: 'image_url',
+      image_url: url
+    };
+  }
+
+  return {
+    type: 'image_url',
+    image_url: {
+      url
+    }
+  };
+}
+
+function imagePartToText(part, req) {
+  const url = toAbsoluteImageUrl(getImageUrlFromPart(part), req);
+  return url ? `[图片] ${url}` : '[图片]';
+}
+
+function normalizeUpstreamMessages(messages, req, options = {}) {
   return messages.map((msg) => {
     if (!Array.isArray(msg?.content)) return msg;
 
+    const content = msg.content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return part;
+        if (part.type !== 'image_url') return part;
+
+        // Chat Completions only accepts image_url in user messages. Assistant history
+        // generated for UI display must be flattened to text before sending upstream.
+        if (msg.role !== 'user') {
+          return { type: 'text', text: imagePartToText(part, req) };
+        }
+
+        return normalizeImagePartForChat(part, req, options);
+      })
+      .filter(Boolean);
+
     return {
       ...msg,
-      content: msg.content.map((part) => {
-        if (!part || part.type !== 'image_url') return part;
-
-        if (typeof part.image_url === 'string') {
-          return { ...part, image_url: toAbsoluteImageUrl(part.image_url, req) };
-        }
-
-        if (part.image_url && typeof part.image_url === 'object') {
-          const { thumbnailUrl, thumbnail_url, previewUrl, preview_url, ...imageUrlPayload } = part.image_url;
-          return {
-            ...part,
-            image_url: {
-              ...imageUrlPayload,
-              url: toAbsoluteImageUrl(part.image_url.url, req)
-            }
-          };
-        }
-
-        return part;
-      })
+      content
     };
   });
+}
+
+function isImageUrlStringCompatError(details) {
+  const text = stringifyErrorDetails(details).toLowerCase();
+  return text.includes('image_url') && (
+    text.includes('expected an image url') ||
+    text.includes('got an object') ||
+    text.includes('invalid_type')
+  );
+}
+
+async function requestChatCompletion(url, preset, messages, stream, timeoutMs) {
+  return fetchWithTimeout(url, {
+    method: 'POST',
+    headers: buildUpstreamHeaders(preset.apiKey, {}, { includeCompatKeys: false }),
+    body: JSON.stringify({
+      model: preset.model,
+      messages: [buildSystemMessage(), ...messages],
+      stream: Boolean(stream)
+    })
+  }, timeoutMs);
 }
 
 function saveDataUrlImage(dataUrl, maxBytes = 8 * 1024 * 1024) {
@@ -972,18 +1020,47 @@ app.post('/api/chat', requireAdmin, async (req, res) => {
     const url = `${normalizeBaseUrl(preset.baseUrl)}/chat/completions`;
     const upstreamMessages = normalizeUpstreamMessages(messages, req);
 
-    const upstream = await fetchWithTimeout(url, {
-      method: 'POST',
-      headers: buildUpstreamHeaders(preset.apiKey, {}, { includeCompatKeys: false }),
-      body: JSON.stringify({
-        model: preset.model,
-        messages: [buildSystemMessage(), ...upstreamMessages],
-        stream: Boolean(stream)
-      })
-    }, CHAT_FETCH_TIMEOUT_MS);
+    let upstream = await requestChatCompletion(url, preset, upstreamMessages, stream, CHAT_FETCH_TIMEOUT_MS);
 
     if (!upstream.ok) {
       const text = await upstream.text();
+      if (isImageUrlStringCompatError(text)) {
+        writeLog('INFO', '聊天图片格式改用字符串 image_url 后重试', {
+          presetId: preset.id,
+          status: upstream.status
+        });
+        const compatMessages = normalizeUpstreamMessages(messages, req, { imageUrlAsString: true });
+        upstream = await requestChatCompletion(url, preset, compatMessages, stream, CHAT_FETCH_TIMEOUT_MS);
+
+        if (upstream.ok) {
+          if (!stream) {
+            const data = await upstream.json();
+            return res.json(data);
+          }
+
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache, no-transform');
+          res.setHeader('Connection', 'keep-alive');
+
+          if (!upstream.body) {
+            return res.status(500).end('上游无响应流');
+          }
+
+          for await (const chunk of upstream.body) {
+            res.write(chunk);
+          }
+
+          res.end();
+          return;
+        }
+
+        const retryText = await upstream.text();
+        return res.status(upstream.status).json({
+          error: '上游接口返回错误',
+          details: retryText
+        });
+      }
+
       return res.status(upstream.status).json({
         error: '上游接口返回错误',
         details: text
